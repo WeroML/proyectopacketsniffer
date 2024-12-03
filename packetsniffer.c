@@ -24,6 +24,9 @@
 #include <pthread.h>
 #include <string.h>
 
+#define MAX_PACKET_SIZE 65535 //El tamaño máximo de un paquete
+#define RAW_DATA_DISPLAY_BYTES 160  // Número de bytes para mostrar en la ventana RAW
+
 // Definir la estructura de cada paquete
 typedef struct Packet {
     char id[5];
@@ -37,6 +40,8 @@ typedef struct Packet {
     char sourcePort[8];
     char destPort[8];
     int idUnicoPacket;
+    u_char raw_data[MAX_PACKET_SIZE];
+    int raw_data_len;
     struct Packet *next; // Puntero al siguiente nodo
 } Packet;
 
@@ -44,7 +49,7 @@ Packet *packetList = NULL; // Inicializa la lista de paquetes vacía
 
 //Constantes para la interfaz gráfica
 #define WINDOW_HEIGHT 30
-#define WINDOW_WIDTH 120
+#define WINDOW_WIDTH 140
 #define START_Y 2
 #define START_X 2
 #define FILTER_BUFFER_SIZE 512  // Aumentamos el tamaño del buffer
@@ -74,7 +79,9 @@ void cleanup() {
     endwin();
 }
 
-void addPacket(Packet **head, char *id, char *sourceIP, char *destIP, char *protocol, char *sourcePort, char *destPort,char *ttl,char *tos,char *len,char *hlen) {
+void addPacket(Packet **head, char *id, char *sourceIP, char *destIP, char *protocol, 
+               char *sourcePort, char *destPort, char *ttl, char *tos, 
+               char *len, char *hlen, const u_char *raw_data, int raw_data_len) {
     // Crear un nuevo nodo
     Packet *newNode = (Packet *)malloc(sizeof(Packet));
     if (newNode == NULL) {
@@ -115,6 +122,10 @@ void addPacket(Packet **head, char *id, char *sourceIP, char *destIP, char *prot
 
     newNode->idUnicoPacket=conteoPackets;
     newNode->next = NULL;
+
+    // Copiar datos RAW
+    memcpy(newNode->raw_data, raw_data, raw_data_len); //Mover a raw_data del nodo la variable raw_data, hasta la cantidad que raw_data_len diga
+    newNode->raw_data_len = raw_data_len; //Mover el raw_data_len al nodo
 
     conteoPackets++;
 
@@ -245,11 +256,18 @@ void showFilterConfig(){
     wrefresh(filter_window);
     delwin(filter_window);
     
-    // Redibujar ventanas principales
+    // Redibujar las demás ventanas
     touchwin(main_window);
     touchwin(packet_window);
+    touchwin(raw_window);
+    touchwin(struct_window);
     wrefresh(main_window);
     wrefresh(packet_window);
+    wrefresh(raw_window);
+    wrefresh(struct_window);
+
+    //Reiniciar la linea de texto para los paquetes
+    current_line=1;
 }
 
 // Manejador de señal para SIGINT (Ctrl+C)
@@ -314,7 +332,7 @@ void call_me(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *packe
     struct udphdr *udp_header;
     struct icmp *icmp_header;
     int src_port = 0, dst_port = 0;
-    char *proto_str = "UNKNOWN";
+    char *proto_str = "DESCONOCIDO";
   
     switch (protocol_type) {
         case IPPROTO_TCP:
@@ -360,7 +378,8 @@ void call_me(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *packe
 
     // Añadir el paquete a la lista
     addPacket(&packetList, str_id, packet_srcip, packet_dstip, 
-              proto_str, str_src_port, str_dst_port,str_ttl,str_tos,str_len,str_hlen);
+              proto_str, str_src_port, str_dst_port, str_ttl, str_tos, 
+              str_len, str_hlen, packetd_ptr, pkthdr->len);
     
     // Añadir línea separadora después de cada paquete completo
     if (current_line < WINDOW_HEIGHT - 2) {
@@ -370,6 +389,44 @@ void call_me(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *packe
         wrefresh(packet_window);
     }
 }
+
+// Función para mostrar datos RAW en hexadecimal y ASCII
+void display_raw_packet(WINDOW *raw_window, Packet *packet) {
+    wclear(raw_window);
+    box(raw_window, 0, 0);
+    
+    mvwprintw(raw_window, 1, 2, "Datos RAW del Paquete %d (Protocolo: %s)", 
+              packet->idUnicoPacket, packet->protocol);
+    
+    // Limitar a MAX_PACKET_SIZE o RAW_DATA_DISPLAY_BYTES
+    int display_len = packet->raw_data_len < RAW_DATA_DISPLAY_BYTES ? 
+                      packet->raw_data_len : RAW_DATA_DISPLAY_BYTES;
+    
+    // Mostrar datos en formato hexadecimal
+    for (int i = 0; i < display_len; i += 16) {
+        // Imprimir offset
+        mvwprintw(raw_window, 3 + i/16, 2, "%04x: ", i);
+        
+        // Imprimir bytes en hexadecimal
+        for (int j = 0; j < 16 && (i + j) < display_len; j++) {
+            wprintw(raw_window, "%02x ", packet->raw_data[i + j]);
+        }
+        
+        // Imprimir representación ASCII
+        mvwprintw(raw_window, 3 + i/16, 55, "  ");
+        for (int j = 0; j < 16 && (i + j) < display_len; j++) {
+            unsigned char c = packet->raw_data[i + j];
+            wprintw(raw_window, "%c", (c >= 32 && c <= 126) ? c : '.');
+        }
+    }
+    
+    // Información adicional
+    mvwprintw(raw_window, WINDOW_HEIGHT/2 - 2, 2, 
+              "Longitud total del paquete: %d bytes", packet->raw_data_len);
+    
+    wrefresh(raw_window);
+}
+
 
 // Función que se ejecutará en el hilo de captura de paquetes
 void* capture_thread_function(void* arg) {
@@ -397,7 +454,7 @@ int main(int argc, char const *argv[]) {
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
 
-    // Checar si la terminal es de las dimensiones adecuadas
+    // Checar si la terminal es de las dimensiones incorrectas
     if (max_y < WINDOW_HEIGHT + 10 || max_x < WINDOW_WIDTH) {
         endwin();
         fprintf(stderr, "La terminal es muy pequeña, debe ser de:  %d x %d\n", 
@@ -420,7 +477,6 @@ int main(int argc, char const *argv[]) {
     int start_y = (max_y - (WINDOW_HEIGHT + 10)) / 2;
 
     //Creación de ventanas 
-
     main_window = newwin(10, WINDOW_WIDTH, start_y, start_x);
     if (!main_window) {
         endwin();
@@ -428,7 +484,7 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
-    packet_window = newwin(WINDOW_HEIGHT, WINDOW_WIDTH/2, start_y + 10, start_x);
+    packet_window = newwin(WINDOW_HEIGHT, (WINDOW_WIDTH/2)-5, start_y + 10, start_x);
     if (!packet_window) {
         delwin(main_window);
         endwin();
@@ -436,7 +492,7 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
-    struct_window=newwin(WINDOW_HEIGHT/2,WINDOW_WIDTH/2,start_y+10,start_x+60);
+    struct_window=newwin(WINDOW_HEIGHT/2,(WINDOW_WIDTH/2)+5,start_y+10,start_x+65);
     if (!struct_window) {
         delwin(main_window);
         endwin();
@@ -444,7 +500,7 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
-    raw_window=newwin(WINDOW_HEIGHT/2,WINDOW_WIDTH/2,start_y+25,start_x+60);
+    raw_window=newwin(WINDOW_HEIGHT/2,(WINDOW_WIDTH/2)+5,start_y+25,start_x+65);
     if (!raw_window) {
         delwin(main_window);
         endwin();
@@ -473,7 +529,7 @@ int main(int argc, char const *argv[]) {
         werase(main_window);
         box(main_window, 0, 0);
         wattron(main_window, COLOR_PAIR(1));
-        mvwprintw(main_window, 1, 35, "NETSPY");
+        mvwprintw(main_window, 1, 62, "NETSPY");
         wattroff(main_window, COLOR_PAIR(1));
         
         wattron(main_window, COLOR_PAIR(3));
@@ -596,6 +652,12 @@ int main(int argc, char const *argv[]) {
                     mvwprintw(struct_window, 11, 2, "Length: %s", current->len);               
                     mvwprintw(struct_window, 12, 2, "Header length: %s", current->hlen);              
                     wrefresh(struct_window);
+
+                    if (current != NULL) {
+                        // Mostrar datos RAW en raw_window
+                        display_raw_packet(raw_window, current);
+                    }
+                                
                     break;
                 }
                 current = current->next;
@@ -607,6 +669,12 @@ int main(int argc, char const *argv[]) {
                 box(struct_window, 0, 0);
                 mvwprintw(struct_window, 1, 2, "Paquete %d no encontrado", selected_packet);
                 wrefresh(struct_window);
+
+                // Mostrar mensaje de error RAW en raw_window
+                wclear(raw_window);
+                box(raw_window, 0, 0);
+                mvwprintw(raw_window, 1, 2, "Paquete %d no encontrado", selected_packet);      
+                wrefresh(raw_window);    
             }
             
             // Restaurar configuración de pantalla
