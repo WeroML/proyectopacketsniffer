@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <pthread.h>
 #include <string.h>
+#include <time.h>
 
 #define MAX_PACKET_SIZE 65535 //El tamaño máximo de un paquete
 #define RAW_DATA_DISPLAY_BYTES 160  // Número de bytes para mostrar en la ventana RAW
@@ -164,7 +165,7 @@ void showFilterConfig(){
     mvwprintw(filter_window, 1, 2, "Configuración de Filtros");
     mvwprintw(filter_window, 3, 2, "1. Filtrar por IP origen");
     mvwprintw(filter_window, 4, 2, "2. Filtrar por IP destino");
-    mvwprintw(filter_window, 5, 2, "3. Filtrar por protocolo (tcp/udp/icmp)");
+    mvwprintw(filter_window, 5, 2, "3. Filtrar por protocolo (tcp/udp/icmp) (USAR MINUSCULAS)");
     mvwprintw(filter_window, 6, 2, "4. Filtrar por puerto origen");
     mvwprintw(filter_window, 8, 2, "Presione ESC para cancelar");
     
@@ -436,17 +437,65 @@ void* capture_thread_function(void* arg) {
     return NULL;
 }
 
+//Función para exportar los resultados a un archivo CSV
+void export_to_csv() {
+
+    FILE *csv_file = NULL;
+    char csv_path[256];
+
+    snprintf(csv_path, sizeof(csv_path), "netspy_packets_%ld.csv", time(NULL));
+    csv_file = fopen(csv_path, "w");
+
+    if (csv_file == NULL) {
+        // Si no se puede crear el archivo, mostrar un error
+        wclear(struct_window);
+        box(struct_window, 0, 0);
+        mvwprintw(struct_window, 1, 2, "Error: Cannot create CSV file");
+        wrefresh(struct_window);
+        return;
+    }
+
+    // Escribir el header del archivo
+    fprintf(csv_file, "ID,Source IP,Destination IP,Protocol,Source Port,Destination Port,TTL,TOS,Length,Header Length\n");
+
+    // Escribir los datos de cada nodo en el archivo CSV
+    Packet *current = packetList;
+    while (current != NULL) {
+        fprintf(csv_file, "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+                current->id, 
+                current->sourceIP, 
+                current->destIP, 
+                current->protocol, 
+                current->sourcePort, 
+                current->destPort,
+                current->ttl,
+                current->tos,
+                current->len,
+                current->hlen);
+        current = current->next;
+    }
+
+    // Cerrar el archivo
+    fclose(csv_file);
+
+    // Mostrar mensaje de éxito en la pantalla de struct
+    wclear(struct_window);
+    box(struct_window, 0, 0);
+    mvwprintw(struct_window, 1, 2, "Exportado a: %s", csv_path);
+    wrefresh(struct_window);
+}
+
 int main(int argc, char const *argv[]) {
 
     if (!initscr()) {
-        fprintf(stderr, "Error initializing ncurses screen\n");
+        fprintf(stderr, "Error inicializando ncurses!\n");
         return 1;
     }
 
     // Check terminal capabilities
     if (!has_colors()) {
         endwin();
-        fprintf(stderr, "Your terminal does not support colors\n");
+        fprintf(stderr, "Tu terminal no soporta colores!\n");
         return 1;
     }
 
@@ -574,6 +623,11 @@ int main(int argc, char const *argv[]) {
         mvwprintw(main_window, 6, 2, "Presione P para seleccionar un paquete");
         wattroff(main_window, COLOR_PAIR(3));  
 
+        //Texto exportar resultados
+        wattron(main_window, COLOR_PAIR(3));
+        mvwprintw(main_window, 7, 2, "Presione X para exportar resultados a un archivo CSV en la ruta del programa");
+        wattroff(main_window, COLOR_PAIR(3));  
+
         if (scanning) {
             wattron(main_window, COLOR_PAIR(1));
             mvwprintw(main_window, 2, 2, "Estado: Capturando paquetes...");
@@ -694,6 +748,19 @@ int main(int argc, char const *argv[]) {
                 capdev = NULL;
                 scanning = 0;
             }
+
+        } else if (ch=='X' || ch=='x'){
+
+             // Pausar captura
+            if (scanning && capdev) {
+                pcap_breakloop(capdev);
+                pthread_join(capture_thread, NULL);
+            }
+            
+            // Exportar a CSV
+            export_to_csv();           
+
+
         } else if (ch == ' ') {
             if (!scanning) {
                 werase(main_window);
