@@ -1,0 +1,7 @@
+COMANDOS PARA COMPILAR / EJECUTAR EL PROGRAMA:
+
+Ir a la ruta: cd (Ruta donde esté packetsniffer.c)
+
+Compilar el programa: gcc -o packetsniffer packetsniffer.c -lpcap -lncurses -lpthread
+
+Ejecutar el programa: sudo ./packetsniffer
