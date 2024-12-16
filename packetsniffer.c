@@ -456,7 +456,7 @@ void export_to_csv() {
     }
 
     // Escribir el header del archivo
-    fprintf(csv_file, "ID,Source IP,Destination IP,Protocol,Source Port,Destination Port,TTL,TOS,Length,Header Length\n");
+    fprintf(csv_file, "ID,IP Origen,IP Destino,Protocolo,Puerto Origen,Puerto Destino,TTL,TOS,Longitud,Longitud de Encabezado\n");
 
     // Escribir los datos de cada nodo en el archivo CSV
     Packet *current = packetList;
@@ -598,12 +598,12 @@ int main(int argc, char const *argv[]) {
                 break;
             case 1:
                 wattron(main_window, COLOR_PAIR(3));
-                mvwprintw(main_window, 4, 2, "Filtro Activo: Source IP");
+                mvwprintw(main_window, 4, 2, "Filtro Activo: IP Origen");
                 wattroff(main_window, COLOR_PAIR(3));
                 break;
             case 2:
                 wattron(main_window, COLOR_PAIR(3));
-                mvwprintw(main_window, 4, 2, "Filtro Activo: Destination IP");
+                mvwprintw(main_window, 4, 2, "Filtro Activo: IP Destino");
                 wattroff(main_window, COLOR_PAIR(3));
                 break;
             case 3:
@@ -613,7 +613,7 @@ int main(int argc, char const *argv[]) {
                 break;
             case 4:
                 wattron(main_window, COLOR_PAIR(3));
-                mvwprintw(main_window, 4, 2, "Filtro Activo: Source Port");
+                mvwprintw(main_window, 4, 2, "Filtro Activo: Puerto Origen");
                 wattroff(main_window, COLOR_PAIR(3));
                 break;
         }        
