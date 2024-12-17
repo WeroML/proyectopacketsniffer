@@ -20,8 +20,8 @@ fi
 
 # Actualizar el sistema e instalar dependencias necesarias
 echo "1. Actualizando el sistema e instalando dependencias..."
-apt update && apt upgrade -y
-apt install -y gcc libpcap-dev libncurses5-dev
+apt update
+apt install libpcap-dev libncurses5-dev gcc
 
 # Verificar que el archivo fuente existe
 if [ ! -f "$SOURCE_FILE" ]; then
